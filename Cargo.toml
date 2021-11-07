@@ -1,0 +1,12 @@
+[package]
+name = "typie-tty"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clay = "0.1.2"
+curl = "0.4.40"
+public-ip = "0.2.1"
+tokio = "1.13.0"
