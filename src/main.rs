@@ -7,6 +7,7 @@ use rand::Rng;
 use std::process::Command;
 use termion::color;
 use terminal_size::{Width, Height, terminal_size};
+use ncurses::*;
 
 fn main() {
     let matches = App::new("typie-tty")
@@ -74,7 +75,13 @@ fn main() {
             .output()
             .expect("ls command failed to start");
         let paragraph = String::from_utf8(returns.stdout).unwrap();
-        println!("{}", print_paragraph(paragraph, "beautiful here southern concern word than usually fat".to_string()));
+        let mut wrote = "".to_string();
+        while wrote.clone().len() <= paragraph.clone().len() {
+            initscr();
+            refresh();
+            println!("{}", print_paragraph(paragraph.clone(), wrote.clone()));
+            wrote.push((getch() as u8) as char);
+        }
     }
     else {
         println!("You have to join or host and game type --help to see how to do so");
