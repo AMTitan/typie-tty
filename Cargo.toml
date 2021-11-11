@@ -13,3 +13,5 @@ rand = "0.8.4"
 terminal_size = "0.1.17"
 termion = "1.5.6"
 tokio = { version = "1.12.0", features = ["full"] }
+text_box = "*"
+crossterm = "0.22.1"

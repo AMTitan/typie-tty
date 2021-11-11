@@ -1,4 +1,6 @@
+use std::io::stdout;
 use std::process;
+use std::time::SystemTime;
 use clap::{Arg, App};
 use std::io::{Write, Read};
 use std::net::TcpListener;
@@ -8,6 +10,14 @@ use std::process::Command;
 use termion::color;
 use terminal_size::{Width, Height, terminal_size};
 use ncurses::*;
+use crossterm::{QueueableCommand, cursor};
+
+struct Person {
+    ip:String,
+    time_spent:u32,
+    done: u8,
+    acc: u8,
+}
 
 fn main() {
     let matches = App::new("typie-tty")
@@ -31,7 +41,7 @@ fn main() {
             paragraph.push_str(&[words.choose(&mut rand::thread_rng()).unwrap().to_string().as_str() , " "].join(""));
         }
         paragraph = paragraph.trim().to_string();
-        let mut ips:Vec<String> = Vec::new();
+        let mut people:Vec<Person> = Vec::new();
         println!("public ip address: {}", ip());
         let listener = TcpListener::bind("0.0.0.0:5803").unwrap();
         for stream in listener.incoming() {
@@ -55,11 +65,30 @@ fn main() {
             data = (&data[..length]).to_string();
             println!("{}", data);
             if data.starts_with("join") {
-                ips.push(data[5..data.len()].to_string());
+                people.push(Person {ip: data[5..data.len()].to_string(), time_spent: 0, done:0, acc: 0});
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
                     paragraph.len(),
                     paragraph
+                );
+                stream.write(response.as_bytes()).unwrap();
+            }
+            if data.starts_with("data") {
+                let mut peoples = "".to_string();
+                for i in 0..people.len() {
+                    if data.split(" ").nth(1).unwrap() == people[i].ip {
+                        people[i].time_spent = data.split(" ").nth(2).unwrap().parse::<u32>().unwrap();
+                        people[i].done = data.split(" ").nth(3).unwrap().parse::<u8>().unwrap();
+                        people[i].acc = data.split(" ").nth(4).unwrap().parse::<u8>().unwrap();
+                    }
+                    else {
+                        peoples.push_str(format!("{} {} {} ", people[i].time_spent, people[i].done, people[i].acc).as_str());
+                    }
+                }
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
+                    peoples.trim().len(),
+                    peoples.trim()
                 );
                 stream.write(response.as_bytes()).unwrap();
             }
@@ -70,18 +99,58 @@ fn main() {
         }
     } 
     else if matches.is_present("join") {
+        let my_ip:String = ip();
+        let mut people = "".to_string();
         let returns = Command::new("curl")
-            .args(["-X", "POST", &[matches.value_of("join").unwrap() , ":5803"].join(""), "-d", &["join ".to_string(), ip()].join("")])
+            .args(["-X", "POST", &[matches.value_of("join").unwrap() , ":5803"].join(""), "-d", &["join ".to_string(), my_ip.clone()].join("")])
             .output()
             .expect("ls command failed to start");
         let paragraph = String::from_utf8(returns.stdout).unwrap();
         let mut wrote = "".to_string();
+        let now = SystemTime::now();
+        let mut now2 = SystemTime::now();
+        let mut stdout = stdout();
+        initscr();
         while wrote.clone().len() <= paragraph.clone().len() {
-            initscr();
-            refresh();
+            let mut print = "".to_string();
             println!("{}", print_paragraph(paragraph.clone(), wrote.clone()));
-            wrote.push((getch() as u8) as char);
+            print = print + ["You: ".to_string(), (((paragraph[0..wrote.len()].split(" ").count() as f32)/(now.elapsed().unwrap().as_secs() as f32))*60.0).round().to_string(), "wpm     ".to_string()].join("").to_string().as_str();
+            //for i in 0..people.split(" ").count()/3 {
+            //    print = print + [i.to_string().as_str(), ": ", people.split(" ").nth((i*3)+1).unwrap(), "% ", (people.split(" ").nth((i*3)+1).unwrap().parse::<f32>().unwrap() * (paragraph.split(" ").count() as f32/100.0)).round().to_string().as_str(), "wpm     "].join("").to_string().as_str();
+            //}
+            println!("{}", print_paragraph(print, "".to_string()));
+            let charz = getch() as u8;
+            match charz {
+                127 => {if wrote.len() > 0 {wrote = wrote[0..(wrote.len()-1)].to_string()}},
+                _ => wrote.push(charz as char)
+            }
+            if now2.elapsed().unwrap().as_secs() >= 1 {
+                now2 = SystemTime::now();
+                let mut right = 0;
+                for i in 0..wrote.len() {
+                    if wrote.chars().nth(i).unwrap() == paragraph.chars().nth(i).unwrap() {
+                        right+=1;
+                    }
+                }
+                let returns = Command::new("curl")
+                    .args(["-X", "POST", &[matches.value_of("join").unwrap() , ":5803"].join(""), "-d", &["data ".to_string(), my_ip.clone(), " ".to_string(), now.elapsed().unwrap().as_millis().to_string(), " ".to_string(), (((wrote.len() as f32/paragraph.len() as f32)*100.0).round()).to_string(), " ".to_string(), ((right as f32/wrote.len() as f32)*100.0).round().to_string()].join("")])
+                    .output()
+                    .expect("ls command failed to start");
+                people = String::from_utf8(returns.clone().stdout).unwrap().trim().to_string();
+            }
+            stdout.queue(cursor::MoveTo(0,0)).unwrap();
         }
+        let mut right = 0;
+        for i in 0..wrote.len() {
+            if wrote.chars().nth(i).unwrap() == paragraph.chars().nth(i).unwrap() {
+                right+=1;
+            }
+        }
+        let returns = Command::new("curl")
+                    .args(["-X", "POST", &[matches.value_of("join").unwrap() , ":5803"].join(""), "-d", &["data ".to_string(), my_ip.clone(), " ".to_string(), now.elapsed().unwrap().as_millis().to_string(), " ".to_string(), (((wrote.len() as f32/paragraph.len() as f32)*100.0).round()).to_string(), " ".to_string(), ((right as f32/wrote.len() as f32)*100.0).round().to_string()].join("")])
+                    .output()
+                    .expect("ls command failed to start");
+        people = String::from_utf8(returns.stdout).unwrap().trim().to_string();
     }
     else {
         println!("You have to join or host and game type --help to see how to do so");
@@ -105,29 +174,40 @@ fn print_paragraph(paragraph:String, typed:String) -> String {
     if let Some((Width(w), Height(h))) = size {
         let mut returns = "".to_string();
         returns.push_str(format!("{}╭{}╮", color::Fg(color::Reset), "-".repeat((w-2).into())).as_str());
-        for x in 0..paragraph.len()/(((w-2) as f32).ceil()) as usize {
-            returns.push_str(format!("{}|", color::Fg(color::Reset)).as_str());
-            for y in (x*((w-2) as usize))..((x+1)*((w-2) as usize)) {
-                match paragraph.chars().nth(y) {
-                    Some(char) => {
-                        if typed.len() > y {
-                            if typed.chars().nth(y).unwrap() == char {
-                                returns.push_str(format!("{}{}", color::Fg(color::LightBlack), char).as_str());
-                            }
-                            else {
-                                returns.push_str(format!("{}{}", color::Fg(color::Red), char).as_str());
-                            }
+        if paragraph.len() > w.into() {
+            for x in 0..(paragraph.len()/(((w-2) as f32).ceil()) as usize+1) {
+                returns.push_str(format!("{}|", color::Fg(color::Reset)).as_str());
+                let mut n = 0;
+                for y in (x*((w-2) as usize))..((x+1)*((w-2) as usize)) {
+                    if paragraph.chars().nth(y).is_some() {
+                        let char = paragraph.chars().nth(y).unwrap();
+                        if char == '\n' {
+                            returns.push_str(" ".repeat((w+5-(n as u16)).into()).as_str());
                         }
                         else {
-                            returns.push_str(format!("{}{}", color::Fg(color::Reset), char).as_str());
+                            if typed.len() > y {
+                                if typed.chars().nth(y).unwrap() == char {
+                                    returns.push_str(format!("{}{}", color::Fg(color::LightBlack), char).as_str());
+                                }
+                                else {
+                                    returns.push_str(format!("{}{}", color::Fg(color::Red), char).as_str());
+                                }
+                            }
+                            else {
+                                returns.push_str(format!("{}{}", color::Fg(color::Reset), char).as_str());
+                            }
                         }
+                        n+=1;
                     }
-                    None => {
+                    else {
                         returns.push_str(format!("{} ", color::Fg(color::Reset)).as_str());
                     }
                 }
+                returns.push_str(format!("{}|", color::Fg(color::Reset)).as_str());
             }
-            returns.push_str(format!("{}|", color::Fg(color::Reset)).as_str());
+        }
+        else {
+            returns.push_str(["|", paragraph.as_str(), &" ".repeat(((w as usize)-paragraph.len()-2) as usize) ,"|"].join("").as_str());
         }
         returns.push_str(format!("{}╰{}╯", color::Fg(color::Reset), "-".repeat((w-2).into())).as_str());
         returns
